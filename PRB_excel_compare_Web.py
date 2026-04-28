@@ -11,7 +11,6 @@ st.set_page_config(page_title="PRB 인건비 통합 검토", layout="wide")
 
 # --- 로고 및 사이드바 설정 ---
 try:
-    # 사이드바 상단에 로고 배치
     st.sidebar.image("Metanet Fullcolor.png", use_container_width=True)
 except:
     pass
@@ -19,9 +18,17 @@ except:
 st.sidebar.title("🛠️ 검토 설정")
 st.title("📊 PRB Data Validation")
 
-# --- [설정] 서버에 저장된 마스터 파일 이름 ---
-# 깃허브에 올린 파일명과 대소문자/띄어쓰기가 일치해야 합니다.
+# --- [중요] 깃허브에 올린 파일명과 '토씨 하나 안 틀리고' 똑같이 적어주세요 ---
+# 공백(띄어쓰기)이 포함된 경우 아래와 같이 작성합니다.
 MASTER_FILE_NAME = "MDL 통합 SC 인원.xlsx"
+
+# --- 진단용: 서버에 파일이 있는지 확인하는 기능 ---
+if not os.path.exists(MASTER_FILE_NAME):
+    st.sidebar.error(f"❌ '{MASTER_FILE_NAME}' 파일을 찾을 수 없습니다.")
+    st.sidebar.write("현재 서버 파일 목록:")
+    st.sidebar.write(os.listdir(".")) # 서버에 있는 실제 파일들을 리스트로 보여줍니다.
+else:
+    st.sidebar.success(f"✅ 기준 파일 로드 완료: {MASTER_FILE_NAME}")
 
 # --- 사이드바 메뉴 구성 ---
 main_category = st.sidebar.selectbox(
@@ -30,7 +37,6 @@ main_category = st.sidebar.selectbox(
 )
 
 target_sheet_name = ""
-
 if main_category == "Metanet DL":
     sub_version = st.sidebar.radio(
         "세부 버전을 선택하세요",
@@ -44,14 +50,11 @@ else:
     sub_version = st.sidebar.radio("세부 버전을 선택하세요", ["기본 양식"])
     target_sheet_name = "SC 인원현황"
 
-st.sidebar.success(f"현재 모드: {sub_version}")
-st.sidebar.info(f"기준 시트: {target_sheet_name}")
-
 # --- 검토 대상 파일(PRB)의 열 설정 (B, D, E열 기준) ---
-start_row = 2   # 데이터 시작 행
-id_col = 2      # B열: 사번
-name_col = 4    # D열: 성명
-grade_col = 5   # E열: 등급
+start_row = 2   
+id_col = 2      # B열
+name_col = 4    # D열
+grade_col = 5   # E열
 
 # --- 유틸리티 함수 ---
 def clean_id(val):
@@ -63,17 +66,10 @@ def normalize_grade(val):
     if val is None or pd.isna(val): return "EMPTY"
     return str(val).strip().upper().replace(" ", "").replace("-", "")
 
-def style_p1_results(df):
-    def apply_style(row):
-        if row['비고'] in ['사번 업데이트', '사번 보정']:
-            return ['background-color: #CCE5FF; font-weight: bold;' if col == '변경 사번' else '' for col in df.columns]
-        return ['' for _ in df.columns]
-    return df.style.apply(apply_style, axis=1)
-
 if 'integrated_results' not in st.session_state:
     st.session_state.integrated_results = None
 
-# --- [UI 수정] 검토 대상 파일 하나만 업로드 ---
+# --- UI: 검토 대상 파일 업로드 ---
 st.divider()
 target_file = st.file_uploader(f"검토할 {sub_version} 파일을 업로드하세요", type=['xlsx'])
 
@@ -84,12 +80,11 @@ if st.sidebar.button("🧹 결과 데이터 초기화"):
 # --- 메인 실행 로직 ---
 if target_file:
     if st.button("🚀 데이터 검토 시작", use_container_width=True):
-        # 1. 서버 내 마스터 파일 존재 여부 확인
         if not os.path.exists(MASTER_FILE_NAME):
-            st.error(f"⚠️ 서버에 '{MASTER_FILE_NAME}' 파일이 없습니다. 깃허브 업로드 상태를 확인하세요.")
+            st.error(f"⚠️ 서버에 '{MASTER_FILE_NAME}' 파일이 없습니다. 파일명을 확인하거나 다시 push 해주세요.")
         else:
             try:
-                with st.spinner(f'서버 마스터 데이터({target_sheet_name}) 로드 중...'):
+                with st.spinner(f'마스터 데이터({target_sheet_name}) 분석 중...'):
                     # 마스터 파일 읽기
                     df_master = pd.read_excel(MASTER_FILE_NAME, sheet_name=target_sheet_name)
                     
@@ -97,7 +92,7 @@ if target_file:
                     id_to_grade_map = {}
 
                     for _, row in df_master.iterrows():
-                        # 마스터 파일 인덱스: B(1)=사번, D(3)=성명, E(4)=등급
+                        # B(1)=사번, D(3)=성명, E(4)=등급
                         m_id = clean_id(row.iloc[1])
                         name = str(row.iloc[3]).strip()
                         m_grade = row.iloc[4]
@@ -106,10 +101,10 @@ if target_file:
                         master_resources[name].append({'id': m_id, 'grade': m_grade})
                         id_to_grade_map[m_id] = m_grade
 
-                with st.spinner('업로드 파일 검증 중...'):
+                with st.spinner('검증 진행 중...'):
                     target_bytes = target_file.getvalue()
                     wb = load_workbook(io.BytesIO(target_bytes))
-                    ws = wb.active # 첫 번째 시트 대상
+                    ws = wb.active
                     
                     fill_blue = PatternFill(start_color="CCE5FF", end_color="CCE5FF", fill_type="solid")
                     fill_red = PatternFill(start_color="FFCCCC", end_color="FFCCCC", fill_type="solid")
@@ -124,16 +119,14 @@ if target_file:
                         original_id = clean_id(ws.cell(r_idx, id_col).value)
                         original_grade = ws.cell(r_idx, grade_col).value
                         
-                        # 사번 보정 로직
                         if name in master_resources:
                             m_id = master_resources[name][0]['id']
                             if original_id != m_id:
                                 ws.cell(r_idx, id_col).value = m_id
                                 ws.cell(r_idx, id_col).fill = fill_blue
                                 p1_updates.append({"행번호": r_idx, "성명": name, "기존 사번": original_id, "변경 사번": m_id, "비고": "사번 보정"})
-                                original_id = m_id # 등급 비교를 위해 보정된 사번 사용
+                                original_id = m_id
 
-                        # 등급 검증 로직
                         if original_id in id_to_grade_map:
                             m_grade = id_to_grade_map[original_id]
                             if normalize_grade(original_grade) != normalize_grade(m_grade):
@@ -162,7 +155,7 @@ if st.session_state.integrated_results:
     col_a, col_b = st.columns(2)
     with col_a:
         st.subheader("🚩 사번 보정 내역")
-        if not res['p1_df'].empty: st.dataframe(style_p1_results(res['p1_df']), use_container_width=True)
+        if not res['p1_df'].empty: st.dataframe(res['p1_df'], use_container_width=True)
         else: st.info("보정 내역 없음")
     with col_b:
         st.subheader("🚩 등급 수정 내역")

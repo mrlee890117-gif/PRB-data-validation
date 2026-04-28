@@ -9,26 +9,14 @@ import os
 # [1] 페이지 설정
 st.set_page_config(page_title="PRB 인건비 통합 검토", layout="wide")
 
-# --- 법인별 마스터 파일명 설정 ---
-# 깃허브에 이 이름들과 똑같은 파일들이 올라가 있어야 합니다.
+# --- 법인별 마스터 파일명 설정 (수정 완료) ---
+# ※ 주의: GitHub에 업로드된 파일명과 대소문자/공백까지 완벽히 일치해야 합니다.
 MASTER_FILES = {
     "Metanet DL": "MDL 통합 SC 인원.xlsx",
     "Metanet Fintech": "MF 통합 SC 인원.xlsx",
     "Metanet Digital": "MD 통합 SC 인원.xlsx",
     "Skelter Labs": "SKL 통합 SC 인원.xlsx"
 }
-
-# 사이드바에서 법인 선택
-main_category = st.sidebar.selectbox("법인 그룹을 선택하세요", list(MASTER_FILES.keys()))
-
-# 선택된 법인에 맞는 파일 결정
-CURRENT_MASTER_PATH = MASTER_FILES[main_category]
-
-# 버전별 시트 선택 로직 (기존과 동일)
-if "이전 버전" in sub_version:
-    CURRENT_MASTER_SHEET = "(old)SC인원 현황_B15"
-else:
-    CURRENT_MASTER_SHEET = "(new)SC인원 현황_B20"
 
 # --- 로고 및 사이드바 설정 ---
 try:
@@ -40,10 +28,7 @@ st.sidebar.title("🛠️ 검토 설정")
 st.title("📊 PRB Data Validation")
 
 # --- 1단계: 법인 및 버전 선택 ---
-main_category = st.sidebar.selectbox(
-    "법인 그룹을 선택하세요",
-    ["Metanet DL", "Metanet Fintech", "Metanet Digital", "Skelter Labs"]
-)
+main_category = st.sidebar.selectbox("법인 그룹을 선택하세요", list(MASTER_FILES.keys()))
 
 if main_category == "Metanet DL":
     sub_version = st.sidebar.radio("세부 버전을 선택하세요", ["(DL) 2026년 3월 이전 버전", "(DL) 2026년 3월 이후 버전"])
@@ -54,16 +39,19 @@ elif main_category == "Metanet Digital":
 else:
     sub_version = st.sidebar.radio("세부 버전을 선택하세요", ["(SKL) ver.1.1"])
 
-# [핵심 수정] 선택한 버전에 따라 마스터 시트 네임을 결정하는 로직
+# 현재 선택된 마스터 파일 경로 및 시트 이름 결정
+CURRENT_MASTER_PATH = MASTER_FILES[main_category]
+
 if "이전 버전" in sub_version:
-    CURRENT_MASTER_SHEET = "(old)SC인원 현황_B15"  # 이전 버전 선택 시
+    CURRENT_MASTER_SHEET = "(old)SC인원 현황_B15"
 else:
-    CURRENT_MASTER_SHEET = "(new)SC인원 현황_B20"  # 이후 버전(기본) 선택 시
+    CURRENT_MASTER_SHEET = "(new)SC인원 현황_B20"
 
 st.sidebar.success(f"현재 모드: {sub_version}")
-st.sidebar.info(f"검증 기준 시트: {CURRENT_MASTER_SHEET}")
+st.sidebar.info(f"검증 기준 파일: {CURRENT_MASTER_PATH}\n기준 시트: {CURRENT_MASTER_SHEET}")
 
-# 버전별 엑셀 컬럼 위치 설정
+# 검증 대상 파일(업로드된 파일)의 데이터 시작 위치 및 컬럼 인덱스
+# B=6(사번), C=7(성명), D=8(직급) 이라고 가정 (필요시 조정)
 start_row, id_col, name_col, grade_col = 6, 6, 7, 8
 
 # --- 유틸리티 함수 ---
@@ -109,27 +97,34 @@ if st.sidebar.button("🧹 데이터 초기화"):
 
 if target_file:
     if st.button("🚀 데이터 검토 시작", use_container_width=True):
-        if not os.path.exists(MASTER_FILE_PATH):
-            st.error(f"❌ 기준 파일('{MASTER_FILE_PATH}')을 찾을 수 없습니다.")
+        # 파일 존재 여부 확인
+        if not os.path.exists(CURRENT_MASTER_PATH):
+            st.error(f"❌ 기준 파일('{CURRENT_MASTER_PATH}')을 찾을 수 없습니다. GitHub 저장소에 파일이 있는지 확인하세요.")
         else:
             try:
-                with st.spinner(f'[{CURRENT_MASTER_SHEET}] 기준 분석 중...'):
-                    # 선택된 시트(old 또는 new)를 로드
-                    df_master = pd.read_excel(MASTER_FILE_PATH, sheet_name=CURRENT_MASTER_SHEET)
+                with st.spinner(f'마스터 파일 [{CURRENT_MASTER_SHEET}] 분석 중...'):
+                    # 엑셀의 6행부터 데이터가 있다면 skiprows=5 적용
+                    df_master = pd.read_excel(CURRENT_MASTER_PATH, sheet_name=CURRENT_MASTER_SHEET, skiprows=5, engine='openpyxl')
                     
                     master_resources = {}
                     id_to_grade_map = {} 
 
                     for _, row in df_master.iterrows():
-                        # iloc를 사용하여 열 위치로 안전하게 가져오기 (B=1, D=3, E=4)
-                        m_id = clean_id(row.iloc[1])
-                        name = str(row.iloc[3]).strip()
-                        m_grade = row.iloc[4]
-                        
-                        if name not in master_resources: master_resources[name] = []
-                        master_resources[name].append({'id': m_id, 'grade': m_grade, 'used': False})
-                        id_to_grade_map[m_id] = m_grade
+                        # skiprows 적용 후: 사번(0번 인덱스), 성명(2번 인덱스), 등급(3번 인덱스) 확인 필요
+                        try:
+                            m_id = clean_id(row.iloc[0])   
+                            name = str(row.iloc[2]).strip() 
+                            m_grade = row.iloc[3]          
+                            
+                            if name == 'nan' or not name: continue
+                            
+                            if name not in master_resources: master_resources[name] = []
+                            master_resources[name].append({'id': m_id, 'grade': m_grade, 'used': False})
+                            id_to_grade_map[m_id] = m_grade
+                        except:
+                            continue
 
+                    # 대상 파일 처리 (업로드한 파일)
                     target_bytes = target_file.getvalue()
                     wb = load_workbook(io.BytesIO(target_bytes))
                     ws = wb['A3.자사인건비'] if 'A3.자사인건비' in wb.sheetnames else wb.active
@@ -151,6 +146,7 @@ if target_file:
                         original_grade = ws.cell(r_idx, grade_col).value
                         final_id = original_id
                         
+                        # [검증 1] 사번 체크 및 보정
                         if name in master_resources:
                             m_list = master_resources[name]
                             match = next((m for m in m_list if not m['used']), m_list[0])
@@ -167,6 +163,7 @@ if target_file:
                                     "비고": "사번 업데이트" if not original_id else "사번 보정"
                                 })
 
+                        # [검증 2] 등급 체크
                         if final_id in id_to_grade_map:
                             m_grade = id_to_grade_map[final_id]
                             if normalize_grade(original_grade) != normalize_grade(m_grade):
@@ -189,19 +186,24 @@ if target_file:
                     st.balloons()
 
             except Exception as e:
-                st.error(f"⚠️ 오류 발생: {e}")
+                st.error(f"⚠️ 실행 중 오류가 발생했습니다: {e}")
+                import traceback
+                st.expander("상세 에러 로그 확인").code(traceback.format_exc())
 
-# 결과 출력부 (기존과 동일)
+# 결과 화면 출력부
 if st.session_state.integrated_results:
     res = st.session_state.integrated_results
     st.divider()
     col_a, col_b = st.columns(2)
     with col_a:
         st.subheader("🚩 사번 보정 내역")
-        if not res['p1_df'].empty: st.dataframe(style_p1_results(res['p1_df']), use_container_width=True)
-        else: st.info("사번 특이사항 없음")
+        if not res['p1_df'].empty: 
+            st.dataframe(style_p1_results(res['p1_df']), use_container_width=True)
+        else: 
+            st.info("✅ 사번 불일치 내역이 없습니다.")
     with col_b:
         st.subheader("🚩 등급 수정 내역")
-        if not res['p2_df'].empty: st.dataframe(res['p2_df'], use_container_width=True)
-        else: st.info("등급 불일치 없음")
-    st.download_button("💾 결과 엑셀 다운로드", res['file_content'], res['file_name'], use_container_width=True, type="primary")
+        if not res['p2_df'].empty: 
+            st.dataframe(res['p2_df'], use_container_width=True)
+        else: 
+            st.info("✅ 등급 불일치 내역이 없습니다.")

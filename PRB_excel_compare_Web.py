@@ -9,8 +9,26 @@ import os
 # [1] 페이지 설정
 st.set_page_config(page_title="PRB 인건비 통합 검토", layout="wide")
 
-# --- 설정값 ---
-MASTER_FILE_PATH = "MDL 통합 SC 인원.xlsx"
+# --- 법인별 마스터 파일명 설정 ---
+# 깃허브에 이 이름들과 똑같은 파일들이 올라가 있어야 합니다.
+MASTER_FILES = {
+    "Metanet DL": "MDL 통합 SC 인원.xlsx",
+    "Metanet Fintech": "MF 통합 SC 인원.xlsx",
+    "Metanet Digital": "MD 통합 SC 인원.xlsx",
+    "Skelter Labs": "SKL 통합 SC 인원.xlsx"
+}
+
+# 사이드바에서 법인 선택
+main_category = st.sidebar.selectbox("법인 그룹을 선택하세요", list(MASTER_FILES.keys()))
+
+# 선택된 법인에 맞는 파일 결정
+CURRENT_MASTER_PATH = MASTER_FILES[main_category]
+
+# 버전별 시트 선택 로직 (기존과 동일)
+if "이전 버전" in sub_version:
+    CURRENT_MASTER_SHEET = "(old)SC인원 현황_B15"
+else:
+    CURRENT_MASTER_SHEET = "(new)SC인원 현황_B20"
 
 # --- 로고 및 사이드바 설정 ---
 try:

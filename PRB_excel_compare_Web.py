@@ -10,7 +10,7 @@ import os
 st.set_page_config(page_title="PRB 인건비 통합 검토", layout="wide")
 st.title("📊 PRB Data Validation")
 st.markdown("""
-**PRB 파일내 성명을 기준으로 사번 추출 후 해당 등급 정합성 검토**
+**PRB 파일 작성을 위한 사번, 성명, B등급 등 기본 정보 사전 검토**
 1. **사번 검토**: 사번추가(사번업데이트) / 사번수정(사번보정) / 동명이인 / 동일인 중복
 2. **등급 정합성 검토**: 사번 기준으로 현재 해당 등급 검토
 """)

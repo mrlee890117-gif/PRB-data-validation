@@ -21,7 +21,7 @@ st.title("📊 PRB Data Validation")
 
 # --- [설정] 서버에 저장된 마스터 파일 이름 ---
 # 깃허브에 올린 파일명과 대소문자/띄어쓰기가 일치해야 합니다.
-MASTER_FILE_NAME = "#MDL 통합 SC 인원.xlsx"
+MASTER_FILE_NAME = "MDL 통합 SC 인원.xlsx"
 
 # --- 사이드바 메뉴 구성 ---
 main_category = st.sidebar.selectbox(

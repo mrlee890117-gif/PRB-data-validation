@@ -9,8 +9,7 @@ import os
 # [1] 페이지 설정
 st.set_page_config(page_title="PRB 인건비 통합 검토", layout="wide")
 
-# --- 법인별 마스터 파일명 설정 (수정 완료) ---
-# ※ 주의: GitHub에 업로드된 파일명과 대소문자/공백까지 완벽히 일치해야 합니다.
+# --- 법인별 마스터 파일명 설정 ---
 MASTER_FILES = {
     "Metanet DL": "MDL 통합 SC 인원.xlsx",
     "Metanet Fintech": "MF 통합 SC 인원.xlsx",
@@ -18,7 +17,7 @@ MASTER_FILES = {
     "Skelter Labs": "SKL 통합 SC 인원.xlsx"
 }
 
-# --- 로고 및 사이드바 설정 ---
+# --- 로고 설정 ---
 try:
     st.sidebar.image("Metanet Fullcolor.png", use_container_width=True)
 except:
@@ -39,7 +38,6 @@ elif main_category == "Metanet Digital":
 else:
     sub_version = st.sidebar.radio("세부 버전을 선택하세요", ["(SKL) ver.1.1"])
 
-# 현재 선택된 마스터 파일 경로 및 시트 이름 결정
 CURRENT_MASTER_PATH = MASTER_FILES[main_category]
 
 if "이전 버전" in sub_version:
@@ -47,18 +45,25 @@ if "이전 버전" in sub_version:
 else:
     CURRENT_MASTER_SHEET = "(new)SC인원 현황_B20"
 
-st.sidebar.success(f"현재 모드: {sub_version}")
-st.sidebar.info(f"검증 기준 파일: {CURRENT_MASTER_PATH}\n기준 시트: {CURRENT_MASTER_SHEET}")
-
-# 검증 대상 파일(업로드된 파일)의 데이터 시작 위치 및 컬럼 인덱스
-# B=6(사번), C=7(성명), D=8(직급) 이라고 가정 (필요시 조정)
-start_row, id_col, name_col, grade_col = 6, 6, 7, 8
+# [핵심 수정 1] 대상 파일(A3.자사인건비)의 실제 인덱스 (E=5, F=6, G=7)
+# 파이썬은 0부터 세기 때문에 엑셀의 E열은 5번입니다.
+start_row, id_col, name_col, grade_col = 6, 5, 6, 7
 
 # --- 유틸리티 함수 ---
 def clean_id(val):
     if val is None or pd.isna(val): return ""
     s = str(val).split('.')[0].strip()
     return s.zfill(7) if s.isdigit() else s
+
+def clean_name(name_str):
+    """성명에서 직함(상무, 부장 등)과 공백을 제거하여 순수 이름만 추출"""
+    if not name_str: return ""
+    s = str(name_str).strip().replace(" ", "")
+    # 빈번한 직함 리스트 제거
+    titles = ["상무", "전무","이사", "부장", "차장", "과장", "대리", "사원"]
+    for t in titles:
+        s = s.replace(t, "")
+    return s
 
 def normalize_grade(val):
     if val is None or pd.isna(val): return "EMPTY"
@@ -77,8 +82,7 @@ def style_p1_results(df):
     def apply_style(row):
         color_map = {
             '사번 업데이트': 'background-color: #CCE5FF; font-weight: bold;',
-            '사번 보정': 'background-color: #D5E8D4; font-weight: bold;',
-            '동명이인': 'background-color: #FFCCCC; font-weight: bold;'
+            '사번 보정': 'background-color: #D5E8D4; font-weight: bold;'
         }
         style = color_map.get(row['비고'], '')
         return [style if col == '변경 사번' else '' for col in df.columns]
@@ -97,34 +101,33 @@ if st.sidebar.button("🧹 데이터 초기화"):
 
 if target_file:
     if st.button("🚀 데이터 검토 시작", use_container_width=True):
-        # 파일 존재 여부 확인
         if not os.path.exists(CURRENT_MASTER_PATH):
-            st.error(f"❌ 기준 파일('{CURRENT_MASTER_PATH}')을 찾을 수 없습니다. GitHub 저장소에 파일이 있는지 확인하세요.")
+            st.error(f"❌ 기준 파일('{CURRENT_MASTER_PATH}')을 찾을 수 없습니다. GitHub 저장소를 확인하세요.")
         else:
             try:
-                with st.spinner(f'마스터 파일 [{CURRENT_MASTER_SHEET}] 분석 중...'):
-                    # 엑셀의 6행부터 데이터가 있다면 skiprows=5 적용
+                with st.spinner(f'마스터 파일 분석 중...'):
+                    # [핵심 수정 2] 마스터 파일 로드 시 skiprows=5 (데이터는 6행부터)
                     df_master = pd.read_excel(CURRENT_MASTER_PATH, sheet_name=CURRENT_MASTER_SHEET, skiprows=5, engine='openpyxl')
                     
                     master_resources = {}
                     id_to_grade_map = {} 
 
                     for _, row in df_master.iterrows():
-                        # skiprows 적용 후: 사번(0번 인덱스), 성명(2번 인덱스), 등급(3번 인덱스) 확인 필요
                         try:
-                            m_id = clean_id(row.iloc[0])   
-                            name = str(row.iloc[2]).strip() 
-                            m_grade = row.iloc[3]          
+                            # [핵심 수정 3] 마스터 인덱스: 사번(B열=1), 성명(D열=3), 등급(E열=4)
+                            m_id = clean_id(row.iloc[1])   
+                            raw_master_name = str(row.iloc[3]).strip()
+                            m_name = clean_name(raw_master_name)
+                            m_grade = row.iloc[4]          
                             
-                            if name == 'nan' or not name: continue
+                            if not m_name or m_name == 'nan': continue
                             
-                            if name not in master_resources: master_resources[name] = []
-                            master_resources[name].append({'id': m_id, 'grade': m_grade, 'used': False})
+                            if m_name not in master_resources: master_resources[m_name] = []
+                            master_resources[m_name].append({'id': m_id, 'grade': m_grade, 'used': False})
                             id_to_grade_map[m_id] = m_grade
                         except:
                             continue
 
-                    # 대상 파일 처리 (업로드한 파일)
                     target_bytes = target_file.getvalue()
                     wb = load_workbook(io.BytesIO(target_bytes))
                     ws = wb['A3.자사인건비'] if 'A3.자사인건비' in wb.sheetnames else wb.active
@@ -137,41 +140,45 @@ if target_file:
 
                     p1_updates, p2_updates = [], []
                     
+                    # [핵심 수정 4] 대상 파일 데이터 행 루프 (6행부터 데이터 시작)
                     for r_idx in range(start_row, ws.max_row + 1):
-                        name_val = ws.cell(r_idx, name_col).value
-                        if not name_val or str(name_val).strip() in ['None', '성명', 'NAN']: continue
+                        # openpyxl의 cell은 1부터 시작하므로 인덱스에 +1
+                        name_cell_val = ws.cell(r_idx, name_col + 1).value 
+                        if not name_cell_val or str(name_cell_val).strip() in ['None', '성명', 'NAN', '담당업무']: continue
                         
-                        name = str(name_val).strip()
-                        original_id = clean_id(ws.cell(r_idx, id_col).value)
-                        original_grade = ws.cell(r_idx, grade_col).value
+                        raw_target_name = str(name_cell_val).strip()
+                        search_name = clean_name(raw_target_name)
+                        
+                        original_id = clean_id(ws.cell(r_idx, id_col + 1).value)
+                        original_grade = ws.cell(r_idx, grade_col + 1).value
                         final_id = original_id
                         
-                        # [검증 1] 사번 체크 및 보정
-                        if name in master_resources:
-                            m_list = master_resources[name]
+                        # 검증 시작
+                        if search_name in master_resources:
+                            m_list = master_resources[search_name]
                             match = next((m for m in m_list if not m['used']), m_list[0])
                             final_id = match['id']
                             match['used'] = True
                             
+                            # 사번 보정
                             if original_id != final_id:
-                                ws.cell(r_idx, id_col).value = final_id
-                                ws.cell(r_idx, id_col).fill = fills["blue"] if not original_id else fills["green"]
+                                ws.cell(r_idx, id_col + 1).value = final_id
+                                ws.cell(r_idx, id_col + 1).fill = fills["blue"] if not original_id else fills["green"]
                                 p1_updates.append({
-                                    "행번호": r_idx, "성명": name, 
+                                    "행번호": r_idx, "성명": raw_target_name, 
                                     "기존 사번": original_id if original_id else "공란", 
                                     "변경 사번": final_id, 
                                     "비고": "사번 업데이트" if not original_id else "사번 보정"
                                 })
 
-                        # [검증 2] 등급 체크
-                        if final_id in id_to_grade_map:
-                            m_grade = id_to_grade_map[final_id]
-                            if normalize_grade(original_grade) != normalize_grade(m_grade):
+                            # 등급 체크
+                            m_grade = id_to_grade_map.get(final_id)
+                            if m_grade and normalize_grade(original_grade) != normalize_grade(m_grade):
                                 fixed_grade = convert_to_target_format(m_grade)
-                                ws.cell(r_idx, grade_col).value = fixed_grade
-                                ws.cell(r_idx, grade_col).fill = fills["red"]
+                                ws.cell(r_idx, grade_col + 1).value = fixed_grade
+                                ws.cell(r_idx, grade_col + 1).fill = fills["red"]
                                 p2_updates.append({
-                                    "행번호": r_idx, "사번": final_id, "성명": name, 
+                                    "행번호": r_idx, "사번": final_id, "성명": raw_target_name, 
                                     "기존 등급": original_grade, "변경 등급": fixed_grade
                                 })
 
@@ -186,24 +193,21 @@ if target_file:
                     st.balloons()
 
             except Exception as e:
-                st.error(f"⚠️ 실행 중 오류가 발생했습니다: {e}")
+                st.error(f"⚠️ 오류 발생: {e}")
                 import traceback
-                st.expander("상세 에러 로그 확인").code(traceback.format_exc())
+                st.expander("상세 에러 보기").code(traceback.format_exc())
 
-# 결과 화면 출력부
+# 결과 출력부 (동일)
 if st.session_state.integrated_results:
     res = st.session_state.integrated_results
     st.divider()
     col_a, col_b = st.columns(2)
     with col_a:
         st.subheader("🚩 사번 보정 내역")
-        if not res['p1_df'].empty: 
-            st.dataframe(style_p1_results(res['p1_df']), use_container_width=True)
-        else: 
-            st.info("✅ 사번 불일치 내역이 없습니다.")
+        if not res['p1_df'].empty: st.dataframe(style_p1_results(res['p1_df']), use_container_width=True)
+        else: st.info("✅ 사번 불일치 없음")
     with col_b:
         st.subheader("🚩 등급 수정 내역")
-        if not res['p2_df'].empty: 
-            st.dataframe(res['p2_df'], use_container_width=True)
-        else: 
-            st.info("✅ 등급 불일치 내역이 없습니다.")
+        if not res['p2_df'].empty: st.dataframe(res['p2_df'], use_container_width=True)
+        else: st.info("✅ 등급 불일치 없음")
+    st.download_button("💾 결과 엑셀 다운로드", res['file_content'], res['file_name'], use_container_width=True, type="primary")
